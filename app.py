@@ -87,7 +87,10 @@ def rsi(series, period=14):
     return 100 - (100 / (1 + rs))
 
 
-df["EMA169"] = ema(df["Close"], 169)
+df["EMA9"] = ema(df["Close"], 9)
+df["EMA29"] = ema(df["Close"], 29)
+df["EMA69"] = ema(df["Close"], 69)
+
 df["RSI"] = rsi(df["Close"], 14)
 
 df = df.dropna()
@@ -96,11 +99,11 @@ df = df.dropna()
 # STATE
 # ==========================================================
 price = float(df["Close"].iloc[-1])
-ema169 = float(df["EMA169"].iloc[-1])
+ema69 = float(df["EMA69"].iloc[-1])
 rsi_now = float(df["RSI"].iloc[-1])
 pl = float(df["PowerLaw"].iloc[-1])
 
-trend_ok = price > ema169
+trend_ok = price > ema69
 
 # ==========================================================
 # SCORE ENGINE (ESTÁVEL)
@@ -138,7 +141,7 @@ last = st.session_state.signal_log[-1]["state"] if st.session_state.signal_log e
 entry = {
     "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     "price": price,
-    "ema169": ema169,
+    "ema69": ema69,
     "rsi": rsi_now,
     "score": score,
     "state": state,
@@ -149,7 +152,7 @@ if last != state:
     st.session_state.signal_log.append(entry)
 
 # ==========================================================
-# UI SIGNAL (CORRIGIDO - SEM DELTAGENERATOR BUG)
+# UI SIGNAL
 # ==========================================================
 if state == "LONG":
     st.success(signal)
@@ -166,14 +169,14 @@ else:
 c1, c2, c3, c4 = st.columns(4)
 
 c1.metric("BNB", f"${price:,.0f}")
-c2.metric("EMA 169", f"${ema169:,.0f}")
+c2.metric("EMA 169", f"${ema69:,.0f}")
 c3.metric("Power Law", f"${pl:,.0f}")
 c4.metric("Score", f"{score:.1f}/100")
 
 st.divider()
 
 # ==========================================================
-# CHART (POWER LAW GARANTIDO)
+# CHART (EMA RIBBON + POWER LAW)
 # ==========================================================
 fig = go.Figure()
 
@@ -183,13 +186,26 @@ fig.add_trace(go.Scatter(
     name="BNB"
 ))
 
+# EMA RIBBON
 fig.add_trace(go.Scatter(
     x=df["Date"],
-    y=df["EMA169"],
-    name="EMA 169"
+    y=df["EMA9"],
+    name="EMA 9"
 ))
 
-# 🔥 POWER LAW RESTAURADO (GARANTIDO NO GRÁFICO)
+fig.add_trace(go.Scatter(
+    x=df["Date"],
+    y=df["EMA29"],
+    name="EMA 29"
+))
+
+fig.add_trace(go.Scatter(
+    x=df["Date"],
+    y=df["EMA69"],
+    name="EMA 69"
+))
+
+# POWER LAW
 fig.add_trace(go.Scatter(
     x=df["Date"],
     y=df["PowerLaw"],
@@ -227,7 +243,9 @@ st.subheader("Resumo Institucional")
 
 st.write({
     "Preço": price,
-    "EMA169": ema169,
+    "EMA9": float(df["EMA9"].iloc[-1]),
+    "EMA29": float(df["EMA29"].iloc[-1]),
+    "EMA69": float(df["EMA69"].iloc[-1]),
     "Power Law": pl,
     "RSI": rsi_now,
     "Score": score,
