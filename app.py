@@ -9,7 +9,7 @@ from datetime import datetime
 # CONFIG
 # ==========================================================
 st.set_page_config(page_title="BNB Signal Engine v2", layout="wide")
-st.title("🏦 BNB Signal Engine v2 — Institutional Grade (PROB ENGINE)")
+st.title("🏦 BNB Signal Engine v2 — Institutional Grade (FULL SYSTEM)")
 
 # ==========================================================
 # SESSION STATE
@@ -18,9 +18,9 @@ if "signal_log" not in st.session_state:
     st.session_state.signal_log = []
 
 # ==========================================================
-# INPUTS (GAIN / LOSS EM ATR)
+# INPUTS
 # ==========================================================
-st.sidebar.header("🎯 Risk Model (ATR Engine)")
+st.sidebar.header("🎯 ATR Risk Engine")
 
 gain_atr = st.sidebar.slider("Take Profit (ATR)", 1.0, 10.0, 3.0, 0.5)
 loss_atr = st.sidebar.slider("Stop Loss (ATR)", 0.5, 5.0, 1.5, 0.5)
@@ -69,7 +69,6 @@ def atr(df, period=14):
 
 
 df["ATR"] = atr(df, 14)
-df = df.dropna().reset_index(drop=True)
 
 # ==========================================================
 # POWER LAW
@@ -96,10 +95,11 @@ def power_law(df):
 df = power_law(df)
 
 # ==========================================================
-# INDICADORES
+# INDICADORES (EMA RIBBON RESTAURADO)
 # ==========================================================
 def ema(series, period):
     return series.ewm(span=period, adjust=False).mean()
+
 
 def rsi(series, period=14):
     delta = series.diff()
@@ -114,7 +114,11 @@ def rsi(series, period=14):
     return 100 - (100 / (1 + rs))
 
 
+df["EMA9"] = ema(df["Close"], 9)
+df["EMA29"] = ema(df["Close"], 29)
+df["EMA69"] = ema(df["Close"], 69)
 df["EMA169"] = ema(df["Close"], 169)
+
 df["RSI"] = rsi(df["Close"], 14)
 
 df = df.dropna()
@@ -123,27 +127,57 @@ df = df.dropna()
 # STATE
 # ==========================================================
 price = float(df["Close"].iloc[-1])
+ema9 = float(df["EMA9"].iloc[-1])
+ema29 = float(df["EMA29"].iloc[-1])
+ema69 = float(df["EMA69"].iloc[-1])
 ema169 = float(df["EMA169"].iloc[-1])
+
 rsi_now = float(df["RSI"].iloc[-1])
 atr_now = float(df["ATR"].iloc[-1])
 
 trend_ok = price > ema169
 
 # ==========================================================
-# SCORE
+# EMA RIBBON STATE MACHINE
+# ==========================================================
+ema_max = max(ema9, ema29, ema69, ema169)
+ema_min = min(ema9, ema29, ema69, ema169)
+
+compression = (ema_max - ema_min) / ema69
+
+if ema9 > ema29 > ema69 > ema169:
+    ribbon_state = "BULLISH"
+elif ema9 < ema29 < ema69 < ema169:
+    ribbon_state = "BEARISH"
+elif compression < 0.08:
+    ribbon_state = "COMPRESSION"
+else:
+    ribbon_state = "NEUTRAL"
+
+# ==========================================================
+# SCORE ENGINE
 # ==========================================================
 trend_score = 60 if trend_ok else 0
 momentum_score = np.clip((40 - rsi_now) * 1.5, 0, 25)
 quality_score = 15 if rsi_now < 45 else 5 if rsi_now < 55 else 0
 
-score = trend_score + momentum_score + quality_score
+if ribbon_state == "BULLISH":
+    ribbon_score = 15
+elif ribbon_state == "COMPRESSION":
+    ribbon_score = 8
+elif ribbon_state == "NEUTRAL":
+    ribbon_score = 3
+else:
+    ribbon_score = 0
+
+score = trend_score + momentum_score + quality_score + ribbon_score
 
 # ==========================================================
 # STATE MACHINE
 # ==========================================================
 if not trend_ok:
     state = "BLOCKED"
-    signal = "⛔ BLOQUEADO"
+    signal = "⛔ BLOQUEADO (EMA 169)"
 
 elif score >= 75:
     state = "LONG"
@@ -158,13 +192,12 @@ else:
     signal = "🔴 SEM TRADE"
 
 # ==========================================================
-# 🧠 PROBABILITY ENGINE (ATR BASED HISTORICAL SIMULATION)
+# PROBABILITY ENGINE (ATR)
 # ==========================================================
 def probability_engine(df, gain_atr, loss_atr, samples=300):
 
     wins = 0
-
-    valid = df.iloc[:-MAX_DAYS] if "MAX_DAYS" in globals() else df.iloc[:-100]
+    valid = df.iloc[:-100]
 
     for _ in range(samples):
 
@@ -178,6 +211,9 @@ def probability_engine(df, gain_atr, loss_atr, samples=300):
             continue
 
         for i in range(1, 60):
+
+            if idx + i >= len(df):
+                break
 
             future = df.iloc[idx + i]["Close"]
 
@@ -201,12 +237,17 @@ last = st.session_state.signal_log[-1]["state"] if st.session_state.signal_log e
 entry = {
     "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     "price": price,
+    "ema9": ema9,
+    "ema29": ema29,
+    "ema69": ema69,
     "ema169": ema169,
     "rsi": rsi_now,
+    "atr": atr_now,
     "score": score,
     "state": state,
     "signal": signal,
-    "prob_gain_first": prob
+    "ribbon": ribbon_state,
+    "prob": prob
 }
 
 if last != state:
@@ -222,8 +263,7 @@ elif state == "WAIT":
 else:
     st.error(signal)
 
-st.sidebar.markdown("### 📊 Probabilidade histórica")
-st.sidebar.metric("Gain antes do Loss", f"{prob*100:.1f}%")
+st.sidebar.metric("Prob Gain > Loss", f"{prob*100:.1f}%")
 
 # ==========================================================
 # METRICS
@@ -243,6 +283,10 @@ st.divider()
 fig = go.Figure()
 
 fig.add_trace(go.Scatter(x=df["Date"], y=df["Close"], name="BNB"))
+
+fig.add_trace(go.Scatter(x=df["Date"], y=df["EMA9"], name="EMA 9"))
+fig.add_trace(go.Scatter(x=df["Date"], y=df["EMA29"], name="EMA 29"))
+fig.add_trace(go.Scatter(x=df["Date"], y=df["EMA69"], name="EMA 69"))
 fig.add_trace(go.Scatter(x=df["Date"], y=df["EMA169"], name="EMA 169"))
 
 fig.add_trace(go.Scatter(
@@ -265,7 +309,8 @@ st.write({
     "Preço": price,
     "Score": score,
     "State": state,
+    "Ribbon": ribbon_state,
+    "Probabilidade": prob,
     "Gain ATR": gain_atr,
-    "Loss ATR": loss_atr,
-    "Probabilidade": prob
+    "Loss ATR": loss_atr
 })
