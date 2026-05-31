@@ -91,6 +91,9 @@ df["EMA9"] = ema(df["Close"], 9)
 df["EMA29"] = ema(df["Close"], 29)
 df["EMA69"] = ema(df["Close"], 69)
 
+# ✅ ADICIONADO (NOVO)
+df["EMA169"] = ema(df["Close"], 169)
+
 df["RSI"] = rsi(df["Close"], 14)
 
 df = df.dropna()
@@ -171,12 +174,12 @@ c1, c2, c3, c4 = st.columns(4)
 c1.metric("BNB", f"${price:,.0f}")
 c2.metric("EMA 169", f"${ema69:,.0f}")
 c3.metric("Power Law", f"${pl:,.0f}")
-c4.metric("Score", f"{score:.1f}/100")
+c4.metric("Score", f"${score:.1f}/100")
 
 st.divider()
 
 # ==========================================================
-# CHART (EMA RIBBON + POWER LAW)
+# CHART (EMA RIBBON + EMA 169 + POWER LAW)
 # ==========================================================
 fig = go.Figure()
 
@@ -203,6 +206,13 @@ fig.add_trace(go.Scatter(
     x=df["Date"],
     y=df["EMA69"],
     name="EMA 69"
+))
+
+# ✅ ADICIONADO EMA 169
+fig.add_trace(go.Scatter(
+    x=df["Date"],
+    y=df["EMA169"],
+    name="EMA 169"
 ))
 
 # POWER LAW
@@ -246,6 +256,7 @@ st.write({
     "EMA9": float(df["EMA9"].iloc[-1]),
     "EMA29": float(df["EMA29"].iloc[-1]),
     "EMA69": float(df["EMA69"].iloc[-1]),
+    "EMA169": float(df["EMA169"].iloc[-1]),
     "Power Law": pl,
     "RSI": rsi_now,
     "Score": score,
