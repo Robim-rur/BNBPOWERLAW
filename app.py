@@ -44,7 +44,7 @@ if df.empty:
     st.stop()
 
 # ==========================================================
-# POWER LAW (RESTORED CORRECTLY)
+# POWER LAW
 # ==========================================================
 def power_law(df):
     df = df.copy()
@@ -90,8 +90,6 @@ def rsi(series, period=14):
 df["EMA9"] = ema(df["Close"], 9)
 df["EMA29"] = ema(df["Close"], 29)
 df["EMA69"] = ema(df["Close"], 69)
-
-# ✅ ADICIONADO (NOVO)
 df["EMA169"] = ema(df["Close"], 169)
 
 df["RSI"] = rsi(df["Close"], 14)
@@ -103,19 +101,50 @@ df = df.dropna()
 # ==========================================================
 price = float(df["Close"].iloc[-1])
 ema69 = float(df["EMA69"].iloc[-1])
+ema9 = float(df["EMA9"].iloc[-1])
+ema29 = float(df["EMA29"].iloc[-1])
+ema169 = float(df["EMA169"].iloc[-1])
+
 rsi_now = float(df["RSI"].iloc[-1])
 pl = float(df["PowerLaw"].iloc[-1])
 
 trend_ok = price > ema69
 
 # ==========================================================
-# SCORE ENGINE (ESTÁVEL)
+# EMA RIBBON DETECTION
+# ==========================================================
+ema_max = max(ema9, ema29, ema69, ema169)
+ema_min = min(ema9, ema29, ema69, ema169)
+
+compression = (ema_max - ema_min) / ema69
+
+if ema9 > ema29 > ema69 > ema169:
+    ribbon_state = "BULLISH"
+elif ema9 < ema29 < ema69 < ema169:
+    ribbon_state = "BEARISH"
+elif compression < 0.08:
+    ribbon_state = "COMPRESSION"
+else:
+    ribbon_state = "NEUTRAL"
+
+# ==========================================================
+# SCORE ENGINE (COM RIBBON)
 # ==========================================================
 trend_score = 60 if trend_ok else 0
 momentum_score = np.clip((40 - rsi_now) * 1.5, 0, 25)
 quality_score = 15 if rsi_now < 45 else 5 if rsi_now < 55 else 0
 
-score = trend_score + momentum_score + quality_score
+# RIBBON SCORE (NOVO)
+if ribbon_state == "BULLISH":
+    ribbon_score = 15
+elif ribbon_state == "COMPRESSION":
+    ribbon_score = 8
+elif ribbon_state == "NEUTRAL":
+    ribbon_score = 3
+else:
+    ribbon_score = 0
+
+score = trend_score + momentum_score + quality_score + ribbon_score
 
 # ==========================================================
 # STATE MACHINE
@@ -137,32 +166,31 @@ else:
     signal = "🔴 SEM TRADE"
 
 # ==========================================================
-# LOG (HISTÓRICO)
+# LOG
 # ==========================================================
 last = st.session_state.signal_log[-1]["state"] if st.session_state.signal_log else None
 
 entry = {
     "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     "price": price,
-    "ema69": ema69,
+    "ema169": ema169,
     "rsi": rsi_now,
     "score": score,
     "state": state,
-    "signal": signal
+    "signal": signal,
+    "ribbon": ribbon_state
 }
 
 if last != state:
     st.session_state.signal_log.append(entry)
 
 # ==========================================================
-# UI SIGNAL
+# UI
 # ==========================================================
 if state == "LONG":
     st.success(signal)
-
 elif state == "WAIT":
     st.warning(signal)
-
 else:
     st.error(signal)
 
@@ -172,50 +200,24 @@ else:
 c1, c2, c3, c4 = st.columns(4)
 
 c1.metric("BNB", f"${price:,.0f}")
-c2.metric("EMA 169", f"${ema69:,.0f}")
+c2.metric("EMA 169", f"${ema169:,.0f}")
 c3.metric("Power Law", f"${pl:,.0f}")
-c4.metric("Score", f"${score:.1f}/100")
+c4.metric("Score", f"{score:.1f}/100")
 
 st.divider()
 
 # ==========================================================
-# CHART (EMA RIBBON + EMA 169 + POWER LAW)
+# CHART
 # ==========================================================
 fig = go.Figure()
 
-fig.add_trace(go.Scatter(
-    x=df["Date"],
-    y=df["Close"],
-    name="BNB"
-))
+fig.add_trace(go.Scatter(x=df["Date"], y=df["Close"], name="BNB"))
 
-# EMA RIBBON
-fig.add_trace(go.Scatter(
-    x=df["Date"],
-    y=df["EMA9"],
-    name="EMA 9"
-))
+fig.add_trace(go.Scatter(x=df["Date"], y=df["EMA9"], name="EMA 9"))
+fig.add_trace(go.Scatter(x=df["Date"], y=df["EMA29"], name="EMA 29"))
+fig.add_trace(go.Scatter(x=df["Date"], y=df["EMA69"], name="EMA 69"))
+fig.add_trace(go.Scatter(x=df["Date"], y=df["EMA169"], name="EMA 169"))
 
-fig.add_trace(go.Scatter(
-    x=df["Date"],
-    y=df["EMA29"],
-    name="EMA 29"
-))
-
-fig.add_trace(go.Scatter(
-    x=df["Date"],
-    y=df["EMA69"],
-    name="EMA 69"
-))
-
-# ✅ ADICIONADO EMA 169
-fig.add_trace(go.Scatter(
-    x=df["Date"],
-    y=df["EMA169"],
-    name="EMA 169"
-))
-
-# POWER LAW
 fig.add_trace(go.Scatter(
     x=df["Date"],
     y=df["PowerLaw"],
@@ -243,8 +245,6 @@ if not log_df.empty:
         file_name="signal_log.csv",
         mime="text/csv"
     )
-else:
-    st.info("Sem histórico ainda.")
 
 # ==========================================================
 # RESUMO
@@ -253,12 +253,13 @@ st.subheader("Resumo Institucional")
 
 st.write({
     "Preço": price,
-    "EMA9": float(df["EMA9"].iloc[-1]),
-    "EMA29": float(df["EMA29"].iloc[-1]),
-    "EMA69": float(df["EMA69"].iloc[-1]),
-    "EMA169": float(df["EMA169"].iloc[-1]),
+    "EMA9": ema9,
+    "EMA29": ema29,
+    "EMA69": ema69,
+    "EMA169": ema169,
     "Power Law": pl,
     "RSI": rsi_now,
+    "Ribbon State": ribbon_state,
     "Score": score,
     "State": state
 })
